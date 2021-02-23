@@ -125,8 +125,11 @@ public class ReentrantLock implements Lock, java.io.Serializable {
         final boolean tryLock() {
             Thread current = Thread.currentThread();
             int c = getState();
+            //若c不为0，表示有人占用，若为自己占有，就走重入逻辑
             if (c == 0) {
+                //尝试抢夺锁
                 if (compareAndSetState(0, 1)) {
+                    //cas修改成功，就表示获得了锁，标记自己就行了
                     setExclusiveOwnerThread(current);
                     return true;
                 }
@@ -172,15 +175,17 @@ public class ReentrantLock implements Lock, java.io.Serializable {
         @ReservedStackAccess
         protected final boolean tryRelease(int releases) {
             int c = getState() - releases;
+            //只有拥有者才能进行释放
             if (getExclusiveOwnerThread() != Thread.currentThread())
                 throw new IllegalMonitorStateException();
+            //若free为0，表示锁解开，释放线程标记，释放信号量
             boolean free = (c == 0);
             if (free)
                 setExclusiveOwnerThread(null);
             setState(c);
             return free;
         }
-
+        //直接判断是不是自己就行了
         protected final boolean isHeldExclusively() {
             // While we must in general read state before owner,
             // we don't need to do so to check if current thread is owner
@@ -262,6 +267,7 @@ public class ReentrantLock implements Lock, java.io.Serializable {
             Thread current = Thread.currentThread();
             int c = getState();
             if (c == 0) {
+                //公平锁需要判断hasQueuedThreads()
                 if (!hasQueuedThreads() && compareAndSetState(0, 1)) {
                     setExclusiveOwnerThread(current);
                     return true;
@@ -280,6 +286,12 @@ public class ReentrantLock implements Lock, java.io.Serializable {
          * Acquires only if thread is first waiter or empty
          */
         protected final boolean tryAcquire(int acquires) {
+            /**
+             *  尝试进行抢夺锁，只有这几个条件满足时，才算成功，并且顺序很重要
+             *  1. 信号量为0
+             *  2. 前面没有排队的线程（公平锁才有的判断
+             *  3. 尝试使用CAS抢夺并成功
+             */
             if (getState() == 0 && !hasQueuedPredecessors() &&
                     compareAndSetState(0, acquires)) {
                 setExclusiveOwnerThread(Thread.currentThread());

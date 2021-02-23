@@ -326,7 +326,7 @@ public abstract class AbstractQueuedSynchronizer
         /**
          * 状态字段，仅采用以下值：
          * SIGNAL：
-         *      此节点的后继者被（或将很快被）阻止（通过停放），因此当前节点在释放或取消时必须取消其后继者的停放。
+         *      此节点的后继者被（或将很快被）阻塞（通过park方法），因此当前节点在释放或取消时必须取消其后继者的停放。
          *      为避免种族冲突，acquire方法必须首先指示它们需要信号，然后重试原子获取，然后在失败时阻塞。
          * CANCELLED：
          *      由于超时或中断，该节点被取消。
@@ -482,17 +482,20 @@ public abstract class AbstractQueuedSynchronizer
     static final long spinForTimeoutThreshold = 1000L;
 
     /**
-     * Inserts node into queue, initializing if necessary. See picture above.
+     * 将节点插入队列，必要时进行初始化。
      * @param node the node to insert
      * @return node's predecessor
      */
     private Node enq(final Node node) {
         for (;;) {
             Node t = tail;
+            //若没有初始化则初始化操作
             if (t == null) { // Must initialize
+                //CAS抢夺一下，失败重新来过
                 if (compareAndSetHead(new Node()))
                     tail = head;
             } else {
+                //抢尾部
                 node.prev = t;
                 if (compareAndSetTail(t, node)) {
                     t.next = node;
@@ -514,6 +517,7 @@ public abstract class AbstractQueuedSynchronizer
         Node pred = tail;
         if (pred != null) {
             node.prev = pred;
+            //尝试一次，失败说明有人在竞争锁，降级进入enq进行争夺
             if (compareAndSetTail(pred, node)) {
                 pred.next = node;
                 return node;
@@ -570,9 +574,8 @@ public abstract class AbstractQueuedSynchronizer
     }
 
     /**
-     * Release action for shared mode -- signals successor and ensures
-     * propagation. (Note: For exclusive mode, release just amounts
-     * to calling unparkSuccessor of head if it needs signal.)
+     * 共享模式下的释放动作-信号后继并确保传播。
+     * （注意：对于独占模式，如果需要信号，释放仅相当于调用head的unparkSuccessor。）
      */
     private void doReleaseShared() {
         /*
@@ -616,20 +619,16 @@ public abstract class AbstractQueuedSynchronizer
         Node h = head; // Record old head for check below
         setHead(node);
         /*
-         * Try to signal next queued node if:
-         *   Propagation was indicated by caller,
-         *     or was recorded (as h.waitStatus either before
-         *     or after setHead) by a previous operation
-         *     (note: this uses sign-check of waitStatus because
-         *      PROPAGATE status may transition to SIGNAL.)
-         * and
-         *   The next node is waiting in shared mode,
-         *     or we don't know, because it appears null
+         * 如果发生以下情况，请尝试向下一个排队的节点发送信号：
+         *   传播是由调用者指示的，
+         *  或者是由上一个操作记录的（作为setHead之前或之后的h.waitStatus）
+         * （请注意：这使用waitStatus的符号检查，因为PROPAGATE状态可能转换为SIGNAL。）
+         * 以及
+         *   下一个节点正在共享模式下等待，
+         *     还是我们不知道，因为它看起来为null
          *
-         * The conservatism in both of these checks may cause
-         * unnecessary wake-ups, but only when there are multiple
-         * racing acquires/releases, so most need signals now or soon
-         * anyway.
+         * 这两项检查中的保守性可能会导致不必要的唤醒，
+         * 但仅当有多个争夺者获得释放时，因此无论现在还是不久，大多数人都需要发出信号。
          */
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
             (h = head) == null || h.waitStatus < 0) {
@@ -701,7 +700,8 @@ public abstract class AbstractQueuedSynchronizer
      *
      * 前者为signal，阻塞
      * 前者为cancel，更新前者
-     * 其他情况：更新前者为signal
+     * 其他情况：更新前者为signal(更新后再一轮尝试，还没有锁
+     * 就会再次访问这里并阻塞了)
      *
      * @param pred node's predecessor holding status
      * @param node the node
@@ -722,6 +722,7 @@ public abstract class AbstractQueuedSynchronizer
             do {
                 node.prev = pred = pred.prev;
             } while (pred.waitStatus > 0);
+            //最后断掉这个废掉的链
             pred.next = node;
         } else {
             /*
@@ -1097,9 +1098,11 @@ public abstract class AbstractQueuedSynchronizer
      *        {@link #tryAcquire} but is otherwise uninterpreted and
      *        can represent anything you like.
      */
+    //先尝试获取锁，成功直接返回，失败则封装线程加入队列
     public final void acquire(int arg) {
         if (!tryAcquire(arg) &&
-            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+                //失败则封装线程加入队列
+                acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
             selfInterrupt();
     }
 
